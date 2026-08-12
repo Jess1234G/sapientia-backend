@@ -1,0 +1,1 @@
+"""Pruebas de /vision/analyze con imagen de ejemplo."""

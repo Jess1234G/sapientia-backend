@@ -1,0 +1,1 @@
+"""Utilidades internas compartidas."""

@@ -1,0 +1,1 @@
+"""Envía imagen a DeepSeek-VL/Janus-Pro; devuelve texto + LaTeX."""
