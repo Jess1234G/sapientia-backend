@@ -1,0 +1,40 @@
+# ===== Web framework =====
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-multipart==0.0.20
+
+# ===== Firebase =====
+firebase-admin==6.6.0
+google-cloud-storage==2.19.0
+google-auth==2.37.0
+
+# ===== IA / Integraciones =====
+httpx==0.28.1
+openai==1.59.7            # DeepSeek expone API compatible con OpenAI
+pinecone-client==5.0.1
+qdrant-client==1.12.1
+sentence-transformers==3.3.1   # embeddings dim 384 (ej: all-MiniLM-L6-v2)
+e2b==1.2.0
+
+# ===== Tareas asíncronas =====
+celery==5.4.0
+redis==5.2.1
+
+# ===== Utilidades =====
+python-dotenv==1.0.1
+python-jose[cryptography]==3.3.0
+python-multipart==0.0.20
+PyJWT==2.10.1
+ulid-py==1.1.0
+numpy==2.2.1
+pillow==11.1.0
+
+# ===== Dev / Test =====
+pytest==8.3.4
+pytest-asyncio==0.25.2
+pytest-cov==6.0.0
+ruff==0.9.2
+
+
