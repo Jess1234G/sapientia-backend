@@ -15,8 +15,10 @@ httpx==0.28.1
 openai==1.59.7            # DeepSeek expone API compatible con OpenAI
 pinecone-client==5.0.1
 qdrant-client==1.12.1
-sentence-transformers==3.3.1   # embeddings dim 384 (ej: all-MiniLM-L6-v2)
-e2b==1.2.0
+sentence-transformers==3.3.1
+e2b-code-interpreter==1.2.0   # <-- CAMBIO: se llamaba e2b, ahora es e2b-code-interpreter
+tavily-python==0.5.0          # <-- Se añadió versión explícita
+requests==2.32.3              # <-- Se añadió requests (imprescindible)
 
 # ===== Tareas asíncronas =====
 celery==5.4.0
@@ -25,7 +27,6 @@ redis==5.2.1
 # ===== Utilidades =====
 python-dotenv==1.0.1
 python-jose[cryptography]==3.3.0
-python-multipart==0.0.20
 PyJWT==2.10.1
 ulid-py==1.1.0
 numpy==2.2.1
@@ -36,5 +37,3 @@ pytest==8.3.4
 pytest-asyncio==0.25.2
 pytest-cov==6.0.0
 ruff==0.9.2
-
-
