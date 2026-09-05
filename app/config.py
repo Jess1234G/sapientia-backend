@@ -38,12 +38,19 @@ class Settings(BaseSettings):
     # DeepSeek
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-reasoner"
+    deepseek_model: str = "deepseek-v4-pro"
 
     # Visión
     vision_model_endpoint: str = "http://localhost:8888/v1/chat/completions"
     vision_model_name: str = "janus-pro"
     vision_api_key: str = ""
+
+    # SimpleTex
+    simpletex_app_id: str = ""
+    simpletex_app_secret: str = ""
+    simpletex_api_url: str = (
+        "https://server.simpletex.net/api/latex_ocr"
+    )
 
     # RAG
     vector_store_backend: str = Field(default="pinecone")  # pinecone | qdrant
@@ -60,8 +67,14 @@ class Settings(BaseSettings):
     e2b_template: str = "sapientia-python"
 
     # Storage
-    gcs_bucket_name: str = "sapientia-artifacts"
-    gcs_bucket_public: bool = True
+
+    # Cloudflare R2
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket_name: str = "sapientia-artifacts"
+    r2_endpoint_url: str = ""
+    r2_region: str = "auto"
 
     # Redis / Celery
     redis_url: str = "redis://localhost:6379/0"

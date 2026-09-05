@@ -7,6 +7,7 @@ import time
 import asyncio
 import re
 import base64
+from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,13 +20,18 @@ from tavily import TavilyClient
 from firebase_admin import credentials, initialize_app, firestore
 from e2b_code_interpreter import AsyncSandbox
 
+from app.api.v1.endpoints import router as api_v1_router
+from app.services.deepseek.client import (
+    get_deepseek_client,
+)
+
 load_dotenv()
 
 # =============================================================
 # 1. CONFIGURACIÓN DE FIREBASE
 # =============================================================
 BASE_DIR = Path(__file__).resolve().parent.parent
-cred_path_rel = os.getenv("FIREBASE_CREDENTIALS_PATH")
+cred_path_rel = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
 
 db = None
 try:
@@ -41,7 +47,7 @@ try:
         else:
             print(f"⚠️ Firebase no conectado: El archivo {cred_path} no existe.")
     else:
-        print("⚠️ Firebase no conectado: Variable FIREBASE_CREDENTIALS_PATH no definida en .env")
+        print("⚠️ Firebase no conectado: Variable FIREBASE_SERVICE_ACCOUNT_PATH no definida en .env")
 except Exception as e:
     print(f"⚠️ Error al conectar Firebase: {e}")
 
@@ -87,7 +93,29 @@ except Exception as e:
 
 _embedding_model_name = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
-app = FastAPI(title="Sapientia API - Visión + Gráficos 3D", version="6.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Gestiona el ciclo de vida del cliente DeepSeek modular.
+
+    El cliente se mantiene reutilizable durante la vida del proceso
+    y se cierra correctamente al apagar FastAPI.
+    """
+
+    deepseek_service = get_deepseek_client()
+
+    try:
+        yield
+    finally:
+        await deepseek_service.close()
+        get_deepseek_client.cache_clear()
+
+
+app = FastAPI(
+    title="Sapientia API - Visión + Gráficos 3D",
+    version="6.0.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -96,6 +124,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(api_v1_router, prefix="/api/v1")
 
 @app.get("/health")
 async def health_check():
@@ -108,6 +138,13 @@ async def health_check():
         "pinecone": index is not None,
         "tavily": tavily_client is not None,
         "e2b_configured": bool(os.getenv("E2B_API_KEY")),
+    }
+
+
+@app.get("/healthz")
+async def healthz():
+    return {
+        "status": "ok"
     }
 
 

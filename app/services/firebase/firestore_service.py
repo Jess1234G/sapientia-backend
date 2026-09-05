@@ -1,14 +1,11 @@
-"""
-firestore_service.py — CRUD de users, conversations y graph_artifacts.
+# backend/app/services/firebase/firestore_service.py
 
-Usa el SDK Admin de Firebase para persistir en Firestore.
-Colecciones: `users`, `conversations`, `graph_artifacts`.
-"""
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
 
+from firebase_admin import firestore as firestore_admin
 from google.cloud.firestore import Client as FirestoreClient
 
 from app.utils.ids import new_id
@@ -17,106 +14,407 @@ logger = logging.getLogger(__name__)
 
 
 class FirestoreService:
-    """Acceso a Firestore (persistencia de negocio)."""
+    """Acceso a Firestore para usuarios, conversaciones y gráficos."""
 
     def __init__(self, client: FirestoreClient) -> None:
         self.client = client
 
-    # ---------- users ----------
-    async def upsert_user(self, uid: str, email: str, name: str, picture: str) -> dict:
-        """Crea o actualiza el documento users/{uid} y lo devuelve."""
+    # =========================================================
+    # USERS
+    # =========================================================
+
+    async def upsert_user(
+        self,
+        uid: str,
+        email: str,
+        name: str,
+        picture: str,
+    ) -> dict:
+        """Crea o actualiza users/{uid} y devuelve el documento."""
+
         now = datetime.now(timezone.utc).isoformat()
+
         doc_ref = self.client.collection("users").document(uid)
+
         doc = doc_ref.get()
         data = doc.to_dict() if doc.exists else {}
 
         updated = {
             **data,
             "uid": uid,
-            "email": email or data.get("email"),
-            "display_name": name or data.get("display_name"),
-            "photo_url": picture or data.get("photo_url"),
+            "email": email or data.get("email", ""),
+            "display_name": name or data.get("display_name", ""),
+            "photo_url": picture or data.get("photo_url", ""),
             "updated_at": now,
         }
+
         updated.setdefault("created_at", now)
         updated.setdefault("carrera", data.get("carrera", ""))
         updated.setdefault("semestre", data.get("semestre", 0))
+
         doc_ref.set(updated, merge=True)
+
         return updated
 
-    async def get_user(self, uid: str) -> dict | None:
-        """Devuelve el documento users/{uid} o None."""
-        doc = self.client.collection("users").document(uid).get()
+    async def get_user(
+        self,
+        uid: str,
+    ) -> dict | None:
+        """Devuelve users/{uid} o None."""
+
+        doc = (
+            self.client
+            .collection("users")
+            .document(uid)
+            .get()
+        )
+
         return doc.to_dict() if doc.exists else None
 
-    # ---------- conversations ----------
-    async def create_conversation(self, user_id: str, title: str) -> str:
-        """Crea una conversación y devuelve su ID."""
-        now = datetime.now(timezone.utc).isoformat()
-        ref = self.client.collection("conversations").document()
-        ref.set(
+    # =========================================================
+    # PERSISTENT MEMORY
+    # =========================================================
+
+    async def get_user_memory(
+        self,
+        uid: str,
+    ) -> dict:
+        """
+        Devuelve la memoria persistente del usuario.
+
+        La estructura se mantiene deliberadamente pequeña y
+        controlada para evitar que la memoria crezca sin límite.
+        """
+
+        user = await self.get_user(uid)
+
+        if not user:
+            return {
+                "preferences": [],
+                "facts": [],
+                "goals": [],
+                "projects": [],
+            }
+
+        memory = user.get("memory", {})
+
+        return {
+            "preferences": list(
+                memory.get("preferences", [])
+            ),
+            "facts": list(
+                memory.get("facts", [])
+            ),
+            "goals": list(
+                memory.get("goals", [])
+            ),
+            "projects": list(
+                memory.get("projects", [])
+            ),
+        }
+
+    async def add_memory_items(
+        self,
+        uid: str,
+        category: str,
+        items: list[str],
+    ) -> dict:
+        """
+        Añade elementos a una categoría de memoria persistente.
+
+        Categorías permitidas:
+            preferences
+            facts
+            goals
+            projects
+        """
+
+        allowed_categories = {
+            "preferences",
+            "facts",
+            "goals",
+            "projects",
+        }
+
+        if category not in allowed_categories:
+            raise ValueError(
+                f"Categoría de memoria inválida: {category}"
+            )
+
+        cleaned_items: list[str] = []
+
+        for item in items:
+            value = str(item).strip()
+
+            if not value:
+                continue
+
+            # Evitamos recuerdos excesivamente grandes.
+            value = value[:500]
+
+            if value not in cleaned_items:
+                cleaned_items.append(value)
+
+        if not cleaned_items:
+            return await self.get_user_memory(uid)
+
+        user_ref = (
+            self.client
+            .collection("users")
+            .document(uid)
+        )
+
+        # ArrayUnion evita duplicados y evita reemplazar
+        # la memoria existente.
+        user_ref.update(
             {
-                "conversation_id": ref.id,
-                "user_id": user_id,
-                "title": title,
-                "messages": [],
-                "attachments": [],
-                "status": "active",
-                "created_at": now,
-                "updated_at": now,
+                f"memory.{category}": (
+                    firestore_admin.ArrayUnion(
+                        cleaned_items
+                    )
+                ),
+                "updated_at": datetime.now(
+                    timezone.utc
+                ).isoformat(),
             }
         )
+
+        return await self.get_user_memory(uid)
+
+    # =========================================================
+    # CONVERSATIONS
+    # =========================================================
+
+    async def create_conversation(
+        self,
+        user_id: str,
+        title: str,
+    ) -> str:
+        """
+        Crea una conversación perteneciente al usuario.
+
+        Devuelve el conversation_id generado por Firestore.
+        """
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        ref = (
+            self.client
+            .collection("conversations")
+            .document()
+        )
+
+        payload = {
+            "conversation_id": ref.id,
+            "user_id": user_id,
+            "title": title or "Nueva conversación",
+            "messages": [],
+            "attachments": [],
+            "status": "active",
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        ref.set(payload)
+
         return ref.id
 
-    async def add_message(self, conversation_id: str, message: dict) -> None:
-        """Añade un mensaje a la conversación y actualiza updated_at."""
-        ref = self.client.collection("conversations").document(conversation_id)
+    async def add_message(
+        self,
+        conversation_id: str,
+        message: dict,
+    ) -> None:
+        """
+        Añade un mensaje al array de mensajes de la conversación.
+
+        Importante:
+        ArrayUnion evita reemplazar el historial existente.
+        """
+
+        ref = (
+            self.client
+            .collection("conversations")
+            .document(conversation_id)
+        )
+
+        snapshot = ref.get()
+
+        if not snapshot.exists:
+            raise ValueError(
+                f"La conversación '{conversation_id}' no existe."
+            )
+
         ref.update(
             {
-                "messages": message,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "messages": firestore_admin.ArrayUnion(
+                    [message]
+                ),
+                "updated_at": datetime.now(
+                    timezone.utc
+                ).isoformat(),
             }
         )
 
-    async def list_conversations(self, user_id: str) -> list[dict]:
-        """Devuelve las conversaciones del usuario ordenadas por fecha."""
+    async def list_conversations(
+        self,
+        user_id: str,
+    ) -> list[dict]:
+        """
+        Devuelve las conversaciones pertenecientes exclusivamente
+        al usuario autenticado, ordenadas por updated_at descendente.
+        """
+
         query = (
-            self.client.collection("conversations")
-            .where("user_id", "==", user_id)
-            .order_by("updated_at", direction="DESCENDING")
+            self.client
+            .collection("conversations")
+            .where(
+                "user_id",
+                "==",
+                user_id,
+            )
+            .order_by(
+                "updated_at",
+                direction="DESCENDING",
+            )
         )
-        return [doc.to_dict() for doc in query.stream()]
 
-    async def get_conversation(self, conversation_id: str) -> dict | None:
-        """Devuelve una conversación por ID."""
-        doc = self.client.collection("conversations").document(conversation_id).get()
-        return doc.to_dict() if doc.exists else None
+        return [
+            document.to_dict()
+            for document in query.stream()
+        ]
 
-    # ---------- graph_artifacts ----------
-    async def create_graph_artifact(self, **fields) -> str:
+    async def get_conversation(
+        self,
+        conversation_id: str,
+    ) -> dict | None:
+        """Devuelve una conversación por ID o None."""
+
+        document = (
+            self.client
+            .collection("conversations")
+            .document(conversation_id)
+            .get()
+        )
+
+        if not document.exists:
+            return None
+
+        return document.to_dict()
+
+    async def get_user_conversation(
+        self,
+        conversation_id: str,
+        user_id: str,
+    ) -> dict | None:
+        """
+        Devuelve una conversación únicamente si pertenece
+        al usuario solicitado.
+        """
+
+        conversation = await self.get_conversation(
+            conversation_id
+        )
+
+        if conversation is None:
+            return None
+
+        if conversation.get("user_id") != user_id:
+            return None
+
+        return conversation
+
+    # =========================================================
+    # GRAPH ARTIFACTS
+    # =========================================================
+
+    async def create_graph_artifact(
+        self,
+        **fields,
+    ) -> str:
         """Crea un artefacto de gráfico y devuelve su ID."""
+
         artifact_id = new_id()
-        ref = self.client.collection("graph_artifacts").document(artifact_id)
+
+        ref = (
+            self.client
+            .collection("graph_artifacts")
+            .document(artifact_id)
+        )
+
         payload = {
             "artifact_id": artifact_id,
             "status": "pending",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(
+                timezone.utc
+            ).isoformat(),
             **fields,
         }
+
         ref.set(payload)
+
         return artifact_id
 
-    async def get_graph_artifact(self, artifact_id: str) -> dict | None:
-        """Devuelve un artefacto por ID."""
-        doc = self.client.collection("graph_artifacts").document(artifact_id).get()
+    async def get_graph_artifact(
+        self,
+        artifact_id: str,
+    ) -> dict | None:
+        """Devuelve un artefacto de gráfico por ID."""
+
+        doc = (
+            self.client
+            .collection("graph_artifacts")
+            .document(artifact_id)
+            .get()
+        )
+
         return doc.to_dict() if doc.exists else None
 
+    async def update_graph_artifact(
+        self,
+        artifact_id: str,
+        **fields,
+    ) -> None:
+        """
+        Actualiza los campos de un artefacto de gráfico.
+
+        El documento debe existir. Si no existe, se genera un
+        ValueError para evitar crear accidentalmente un artefacto
+        incompleto durante una actualización.
+        """
+
+        ref = (
+            self.client
+            .collection("graph_artifacts")
+            .document(artifact_id)
+        )
+
+        snapshot = ref.get()
+
+        if not snapshot.exists:
+            raise ValueError(
+                f"El artefacto '{artifact_id}' no existe."
+            )
+
+        if not fields:
+            return
+
+        ref.update(fields)
+
+
+# =============================================================
+# DEPENDENCY
+# =============================================================
 
 def get_firestore_service() -> FirestoreService:
-    """Dependencia FastAPI: FirestoreService (usa app de Firebase)."""
-    from firebase_admin import firestore as firestore_admin
+    """
+    Dependencia FastAPI para obtener FirestoreService
+    usando la aplicación Firebase Admin configurada.
+    """
 
     from app.services.firebase.client import init_firebase
 
-    client: FirestoreClient = firestore_admin.client(app=init_firebase())
+    client: FirestoreClient = firestore_admin.client(
+        app=init_firebase()
+    )
+
     return FirestoreService(client)

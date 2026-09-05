@@ -1,1 +1,6 @@
-.env\ncredentials/\n__pycache__/\n.venv/
+.env
+credentials/
+__pycache__/
+.venv/
+.pytest_cache/
+*.py[cod]

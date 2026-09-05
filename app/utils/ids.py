@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import uuid
 
-from ulid import ULID
+import ulid
 
 
 def new_id() -> str:
     """Genera un ID ULID (string de 26 caracteres, ordenable)."""
-    return str(ULID())
+    return str(ulid.new())
 
 
 def new_uuid() -> str:

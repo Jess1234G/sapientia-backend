@@ -1,33 +1,62 @@
 """
-vision.py — POST /vision/analyze (multipart imagen → OCR/LaTeX).
+vision.py — POST /vision/analyze
 
-Recibe la imagen del usuario, la envía al modelo de visión
-(DeepSeek-VL / Janus-Pro) y devuelve texto + fórmulas LaTeX
-+ estructura descrita para el pipeline de razonamiento.
+Recibe una imagen autenticada y delega el análisis a VisionService.
 """
+
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
+    status,
+)
 
+from app.api.v1.schemas.vision import VisionAnalysisResult
 from app.core.security import get_current_user
+from app.services.vision.vision_service import (
+    VisionService,
+    VisionServiceError,
+    get_vision_service,
+)
+
 
 router = APIRouter()
 
 
-@router.post("/analyze")
+@router.post(
+    "/analyze",
+    response_model=VisionAnalysisResult,
+)
 async def analyze_image(
     image: UploadFile = File(...),
-    # uid: str = Depends(get_current_user),
-):
+    uid: str = Depends(get_current_user),
+    vision: VisionService = Depends(get_vision_service),
+) -> VisionAnalysisResult:
     """
-    Analiza una imagen subida (multipart).
+    Analiza una imagen mediante VisionService.
+    """
 
-    - Valida tipo MIME y tamaño (límite configurable).
-    - Encola tarea asíncrona `analyze_image_task` (Celery).
-    - Devuelve `task_id` o el resultado si se procesa en línea.
-    """
-    # TODO: validar MIME/size → vision_service.analyze() → guardar adjunto
-    return {
-        "filename": image.filename,
-        "detail": "Endpoint pendiente de implementación (OCR/LaTeX)",
-    }
+    del uid
+
+    try:
+        image_bytes = await image.read()
+
+        return await vision.analyze(
+            image_bytes=image_bytes,
+            filename=image.filename or "imagen.png",
+            content_type=(
+                image.content_type
+                or "application/octet-stream"
+            ),
+        )
+
+    except VisionServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
