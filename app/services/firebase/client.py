@@ -30,13 +30,35 @@ def init_firebase() -> firebase_admin.App:
     service_account = settings.firebase_service_account_path
     try:
         if settings.firebase_credentials_available:
+            # El SDK de Firebase Admin exige, además de `client_email`,
+            # el campo `token_uri` (y el resto de campos estándar de una
+            # service account). Reconstruimos el JSON completo: los valores
+            # sensibles vienen de variables de entorno y los valores públicos
+            # (URIs de OAuth y certificados) son constantes de Google.
+            private_key = settings.firebase_private_key.replace(
+                "\\n", "\n"
+            )
+            client_email = settings.firebase_client_email
+
             cred = credentials.Certificate(
                 {
                     "type": "service_account",
                     "project_id": settings.firebase_project_id,
                     "private_key_id": settings.firebase_private_key_id,
-                    "private_key": settings.firebase_private_key.replace("\\n", "\n"),
-                    "client_email": settings.firebase_client_email,
+                    "private_key": private_key,
+                    "client_email": client_email,
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "auth_uri": (
+                        "https://accounts.google.com/o/oauth2/auth"
+                    ),
+                    "auth_provider_x509_cert_url": (
+                        "https://www.googleapis.com/oauth2/v1/certs"
+                    ),
+                    "client_x509_cert_url": (
+                        "https://www.googleapis.com/robot/v1/metadata/x509/"
+                        + client_email
+                    ),
+                    "universe_domain": "googleapis.com",
                 }
             )
             _default_app = firebase_admin.initialize_app(cred)
