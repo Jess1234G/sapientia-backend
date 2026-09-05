@@ -58,15 +58,48 @@ class AuthService:
 
     def validate_token(self, token: str) -> str | None:
         """
-        Devuelve el `uid` si el token es un JWT propio válido.
-        (El ID token de Google se valida solo en /auth/google al hacer login.)
+        Devuelve el uid del usuario autenticado.
+
+        Estrategia:
+        1. Intenta validar el JWT propio de Sapientia (HS256).
+        2. Si no es un JWT válido, intenta validarlo como ID token
+           de Firebase/Google.
         """
-        try:
-            payload = jwt.decode(token, self.secret, algorithms=["HS256"])
-            return payload.get("sub")
-        except JWTError:
-            logger.warning("Sesión JWT inválida o expirada")
+        token = token.strip()
+
+        if not token:
             return None
+
+        # 1. JWT propio de Sapientia
+        try:
+            payload = jwt.decode(
+                token,
+                self.secret,
+                algorithms=["HS256"],
+            )
+
+            uid = payload.get("sub")
+
+            if uid:
+                return uid
+
+        except JWTError:
+            pass
+
+        # 2. ID token de Firebase/Google
+        try:
+            claims = self.verify_google_id_token(token)
+
+            if claims:
+                return claims.get("uid")
+
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "No se pudo validar el ID token de Firebase: %s",
+                exc,
+            )
+
+        return None
 
 
 def get_auth_service() -> AuthService:

@@ -34,7 +34,7 @@ async def get_current_user(
             detail="Falta el encabezado Authorization: Bearer <token>",
         )
 
-    uid = await auth.validate_token(credentials.credentials)
+    uid = auth.validate_token(credentials.credentials)
     if uid is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
