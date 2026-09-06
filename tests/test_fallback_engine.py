@@ -44,8 +44,9 @@ def test_engine_returns_none_when_policy_is_empty():
         request_budget=budget,
     )
 
+    # TOTAL_EXCEEDED sigue sin política de fallback definida.
     result = engine.next_attempt(
-        BudgetVerdict.TRUNCATED
+        BudgetVerdict.TOTAL_EXCEEDED
     )
 
     assert result is None

@@ -58,14 +58,11 @@ class FallbackPolicy:
 # POLÍTICAS
 # ============================================================
 
-# IMPORTANTE:
-# Estas políticas están deliberadamente vacías por ahora.
-#
-# Todavía no hemos validado experimentalmente una segunda
-# estrategia que pueda utilizarse después de un fallo sin
-# sacrificar calidad o generar un costo desproporcionado.
-#
-# No activamos reintentos basándonos en suposiciones.
+# La recuperación automática solo se activa cuando el primer
+# intento NO emitió ningún contenido visible (NO_CONTENT o
+# TRUNCATED sin content). En ese caso se reintenta una única vez
+# con el mismo modelo, thinking desactivado y esfuerzo reducido.
+# No se reutiliza reasoning_content como respuesta.
 
 FALLBACK_POLICIES: dict[
     BudgetVerdict,
@@ -73,9 +70,27 @@ FALLBACK_POLICIES: dict[
 ] = {
     BudgetVerdict.OK: FallbackPolicy(),
 
-    BudgetVerdict.TRUNCATED: FallbackPolicy(),
+    BudgetVerdict.TRUNCATED: FallbackPolicy(
+        attempts=(
+            FallbackAttempt(
+                model="deepseek-v4-pro",
+                thinking_enabled=False,
+                reasoning_effort="low",
+                max_tokens=2048,
+            ),
+        )
+    ),
 
-    BudgetVerdict.NO_CONTENT: FallbackPolicy(),
+    BudgetVerdict.NO_CONTENT: FallbackPolicy(
+        attempts=(
+            FallbackAttempt(
+                model="deepseek-v4-pro",
+                thinking_enabled=False,
+                reasoning_effort="low",
+                max_tokens=2048,
+            ),
+        )
+    ),
 
     BudgetVerdict.TTFC_EXCEEDED: FallbackPolicy(),
 

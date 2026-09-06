@@ -582,3 +582,311 @@ async def test_stream_reasoning_records_no_content_budget_verdict():
     assert metrics.budget_verdict == (
         "no_content"
     )
+
+
+# ============================================================
+# FALLBACK ESTRUCTURAL (S1)
+# ============================================================
+
+class _NoContentThenRecoverClient(FakeDeepSeekClient):
+    """Primera llamada sin contenido (NO_CONTENT); la segunda recupera."""
+
+    def __init__(self):
+        super().__init__()
+        self.call_count = 0
+        self.calls = []
+
+    async def chat_stream(
+        self,
+        messages,
+        max_tokens=4096,
+        reasoning_effort="high",
+        model=None,
+        thinking_enabled=True,
+        metrics=None,
+    ):
+        self.call_count += 1
+        self.calls.append(
+            (max_tokens, model, thinking_enabled, reasoning_effort)
+        )
+
+        if self.call_count == 1:
+            if metrics is not None:
+                metrics.finish_reason = "stop"
+                metrics.completed_at = perf_counter()
+            return
+
+        if metrics is not None and metrics.first_token_at is None:
+            metrics.first_token_at = perf_counter()
+
+        yield "Recuperado."
+
+        if metrics is not None:
+            metrics.finish_reason = "stop"
+            metrics.completed_at = perf_counter()
+
+
+class _AlwaysEmptyClient(FakeDeepSeekClient):
+    """Todas las llamadas devuelven vacío (NO_CONTENT)."""
+
+    def __init__(self):
+        super().__init__()
+        self.call_count = 0
+
+    async def chat_stream(
+        self,
+        messages,
+        max_tokens=4096,
+        reasoning_effort="high",
+        model=None,
+        thinking_enabled=True,
+        metrics=None,
+    ):
+        self.call_count += 1
+
+        if metrics is not None:
+            metrics.finish_reason = "stop"
+            metrics.completed_at = perf_counter()
+
+        return
+        yield  # mantiene async generator
+
+
+class _TruncatedWithContentClient(FakeDeepSeekClient):
+    """TRUNCATED con content emitido."""
+
+    def __init__(self):
+        super().__init__()
+        self.call_count = 0
+
+    async def chat_stream(
+        self,
+        messages,
+        max_tokens=4096,
+        reasoning_effort="high",
+        model=None,
+        thinking_enabled=True,
+        metrics=None,
+    ):
+        self.call_count += 1
+
+        if metrics is not None and metrics.first_token_at is None:
+            metrics.first_token_at = perf_counter()
+
+        yield "Respuesta incompleta."
+
+        if metrics is not None:
+            metrics.finish_reason = "length"
+            metrics.completed_at = perf_counter()
+
+
+class _TruncatedNoContentThenRecoverClient(FakeDeepSeekClient):
+    """TRUNCATED sin content; la segunda llamada recupera."""
+
+    def __init__(self):
+        super().__init__()
+        self.call_count = 0
+        self.calls = []
+
+    async def chat_stream(
+        self,
+        messages,
+        max_tokens=4096,
+        reasoning_effort="high",
+        model=None,
+        thinking_enabled=True,
+        metrics=None,
+    ):
+        self.call_count += 1
+        self.calls.append(
+            (max_tokens, model, thinking_enabled, reasoning_effort)
+        )
+
+        if self.call_count == 1:
+            if metrics is not None:
+                metrics.finish_reason = "length"
+                metrics.completed_at = perf_counter()
+            return
+
+        if metrics is not None and metrics.first_token_at is None:
+            metrics.first_token_at = perf_counter()
+
+        yield "Recuperado."
+
+        if metrics is not None:
+            metrics.finish_reason = "stop"
+            metrics.completed_at = perf_counter()
+
+
+class _FallbackRaisesClient(FakeDeepSeekClient):
+    """Primera llamada vacía; la segunda lanza."""
+
+    def __init__(self):
+        super().__init__()
+        self.call_count = 0
+
+    async def chat_stream(
+        self,
+        messages,
+        max_tokens=4096,
+        reasoning_effort="high",
+        model=None,
+        thinking_enabled=True,
+        metrics=None,
+    ):
+        self.call_count += 1
+
+        if self.call_count == 1:
+            if metrics is not None:
+                metrics.finish_reason = "stop"
+                metrics.completed_at = perf_counter()
+            return
+
+        raise RuntimeError("fallback explotó")
+        yield  # mantiene async generator
+
+
+@pytest.mark.asyncio
+async def test_stream_reasoning_falls_back_on_no_content():
+    from app.core.metrics import RequestMetrics
+
+    client = _NoContentThenRecoverClient()
+    service = ReasoningService(client=client)
+    metrics = RequestMetrics()
+
+    chunks = []
+    async for chunk in service.stream_reasoning(
+        user_message="Genera una respuesta.",
+        metrics=metrics,
+    ):
+        chunks.append(chunk)
+
+    assert chunks == [
+        {"type": "delta", "content": "Recuperado."}
+    ]
+    assert client.call_count == 2
+    assert metrics.budget_verdict == "ok"
+
+    # El fallback debe desactivar thinking y usar low/2048.
+    max_tokens, model, thinking, effort = client.calls[1]
+    assert max_tokens == 2048
+    assert model == "deepseek-v4-pro"
+    assert thinking is False
+    assert effort == "low"
+
+
+@pytest.mark.asyncio
+async def test_stream_reasoning_fallback_also_empty():
+    from app.core.metrics import RequestMetrics
+
+    client = _AlwaysEmptyClient()
+    service = ReasoningService(client=client)
+    metrics = RequestMetrics()
+
+    chunks = []
+    async for chunk in service.stream_reasoning(
+        user_message="Genera una respuesta.",
+        metrics=metrics,
+    ):
+        chunks.append(chunk)
+
+    assert chunks == []
+    assert client.call_count == 2
+    assert metrics.budget_verdict == "no_content"
+
+
+@pytest.mark.asyncio
+async def test_stream_reasoning_truncated_with_content_does_not_fallback():
+    from app.core.metrics import RequestMetrics
+
+    client = _TruncatedWithContentClient()
+    service = ReasoningService(client=client)
+    metrics = RequestMetrics()
+
+    chunks = []
+    async for chunk in service.stream_reasoning(
+        user_message="Genera una respuesta.",
+        metrics=metrics,
+    ):
+        chunks.append(chunk)
+
+    assert chunks == [
+        {"type": "delta", "content": "Respuesta incompleta."}
+    ]
+    assert client.call_count == 1
+    assert metrics.budget_verdict == "truncated"
+
+
+@pytest.mark.asyncio
+async def test_stream_reasoning_truncated_without_content_falls_back():
+    from app.core.metrics import RequestMetrics
+
+    client = _TruncatedNoContentThenRecoverClient()
+    service = ReasoningService(client=client)
+    metrics = RequestMetrics()
+
+    chunks = []
+    async for chunk in service.stream_reasoning(
+        user_message="Genera una respuesta.",
+        metrics=metrics,
+    ):
+        chunks.append(chunk)
+
+    assert chunks == [
+        {"type": "delta", "content": "Recuperado."}
+    ]
+    assert client.call_count == 2
+    assert metrics.budget_verdict == "ok"
+
+
+@pytest.mark.asyncio
+async def test_stream_reasoning_fallback_exception_propagates():
+    from app.core.metrics import RequestMetrics
+
+    client = _FallbackRaisesClient()
+    service = ReasoningService(client=client)
+    metrics = RequestMetrics()
+
+    with pytest.raises(RuntimeError, match="fallback explotó"):
+        async for _ in service.stream_reasoning(
+            user_message="Genera una respuesta.",
+            metrics=metrics,
+        ):
+            pass
+
+    assert client.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_stream_reasoning_respects_request_budget():
+    from app.core.metrics import RequestMetrics
+    from app.services.deepseek.request_budget import (
+        RequestBudget,
+        RequestBudgetConfig,
+    )
+
+    client = _NoContentThenRecoverClient()
+    budget = RequestBudget(
+        RequestBudgetConfig(
+            max_generation_tokens=2048,
+            max_attempts=2,
+        )
+    )
+    service = ReasoningService(
+        client=client,
+        request_budget=budget,
+    )
+    metrics = RequestMetrics()
+
+    chunks = []
+    async for chunk in service.stream_reasoning(
+        user_message="Genera una respuesta.",
+        metrics=metrics,
+    ):
+        chunks.append(chunk)
+
+    # El fallback (2048) no cabe tras el intento principal (1536):
+    # 1536 + 2048 > 2048, por lo que no hay segunda llamada.
+    assert chunks == []
+    assert client.call_count == 1
+    assert metrics.budget_verdict == "no_content"

@@ -23,6 +23,7 @@ from app.services.deepseek.budget import (
 )
 from app.services.deepseek.budget_guard import (
     BudgetGuard,
+    BudgetVerdict,
 )
 from app.services.deepseek.client import (
     DeepSeekClient,
@@ -32,6 +33,13 @@ from app.services.deepseek.client import (
 from app.services.deepseek.difficulty import (
     DifficultyResult,
     classify_difficulty,
+)
+from app.services.deepseek.fallback_engine import (
+    FallbackEngine,
+)
+from app.services.deepseek.request_budget import (
+    RequestBudget,
+    RequestBudgetConfig,
 )
 
 
@@ -177,9 +185,20 @@ class ReasoningService:
         self,
         client: DeepSeekClient | None = None,
         budget_guard: BudgetGuard | None = None,
+        fallback_engine: FallbackEngine | None = None,
+        request_budget: RequestBudget | None = None,
     ) -> None:
         self.client = client or DeepSeekClient()
         self.budget_guard = budget_guard or BudgetGuard()
+        self.request_budget = request_budget or RequestBudget(
+            RequestBudgetConfig(
+                max_generation_tokens=4096,
+                max_attempts=2,
+            )
+        )
+        self.fallback_engine = fallback_engine or FallbackEngine(
+            request_budget=self.request_budget,
+        )
 
     def build_messages(
         self,
@@ -295,6 +314,9 @@ class ReasoningService:
 
         stream_metrics = StreamMetrics()
 
+        # El intento principal reserva su porción del presupuesto global.
+        self.request_budget.reserve(policy.max_tokens)
+
         async for delta in self.client.chat_stream(
             messages=messages,
             max_tokens=policy.max_tokens,
@@ -314,6 +336,45 @@ class ReasoningService:
         verdict = self.budget_guard.evaluate(
             stream_metrics
         )
+
+        # Si el primer intento NO emitió ningún contenido visible
+        # (NO_CONTENT, o TRUNCATED sin content), ejecutamos exactamente
+        # un fallback. Al no haberse emitido nada, no hay respuesta previa
+        # que conservar ni riesgo de mezclar contenido.
+        if (
+            stream_metrics.first_token_at is None
+            and verdict
+            in (
+                BudgetVerdict.NO_CONTENT,
+                BudgetVerdict.TRUNCATED,
+            )
+        ):
+            attempt = self.fallback_engine.next_attempt(
+                verdict
+            )
+
+            if attempt is not None:
+                fallback_metrics = StreamMetrics()
+
+                async for delta in self.client.chat_stream(
+                    messages=messages,
+                    max_tokens=attempt.max_tokens,
+                    reasoning_effort=attempt.reasoning_effort,
+                    model=attempt.model,
+                    thinking_enabled=attempt.thinking_enabled,
+                    metrics=fallback_metrics,
+                ):
+                    if not delta:
+                        continue
+
+                    yield {
+                        "type": "delta",
+                        "content": delta,
+                    }
+
+                verdict = self.budget_guard.evaluate(
+                    fallback_metrics
+                )
 
         if metrics is not None:
             metrics.set_budget_verdict(
