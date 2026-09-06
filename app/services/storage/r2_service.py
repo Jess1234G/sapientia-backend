@@ -94,6 +94,84 @@ class R2Service:
             ExpiresIn=expires_in,
         )
 
+    def upload_bytes_with_key(
+        self,
+        storage_key: str,
+        content: bytes | bytearray,
+        content_type: str,
+    ) -> None:
+        """
+        Sube bytes a R2 bajo una storage_key explícita.
+
+        A diferencia de upload_bytes(), no genera una key aleatoria
+        ni devuelve una URL prefirmada: el caller controla la key.
+        """
+
+        if not content:
+            raise ValueError(
+                "El contenido del archivo no puede estar vacío."
+            )
+
+        if not isinstance(content, (bytes, bytearray)):
+            raise TypeError(
+                "content debe ser bytes o bytearray, "
+                f"no {type(content).__name__}"
+            )
+
+        if not storage_key:
+            raise ValueError(
+                "storage_key no puede estar vacía."
+            )
+
+        body = bytes(content)
+
+        self.client.put_object(
+            Bucket=self.bucket_name,
+            Key=storage_key,
+            Body=body,
+            ContentType=content_type,
+        )
+
+        logger.info(
+            "Objeto subido a R2: bucket=%s key=%s size=%d",
+            self.bucket_name,
+            storage_key,
+            len(body),
+        )
+
+    def generate_presigned_url(
+        self,
+        storage_key: str,
+        expires_in: int = 3600,
+    ) -> str:
+        """Genera una URL prefirmada de lectura para una storage_key."""
+
+        return self.client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": self.bucket_name,
+                "Key": storage_key,
+            },
+            ExpiresIn=expires_in,
+        )
+
+    def delete_object(
+        self,
+        storage_key: str,
+    ) -> None:
+        """Elimina un objeto de R2 por su storage_key."""
+
+        self.client.delete_object(
+            Bucket=self.bucket_name,
+            Key=storage_key,
+        )
+
+        logger.info(
+            "Objeto eliminado de R2: bucket=%s key=%s",
+            self.bucket_name,
+            storage_key,
+        )
+
 
 def get_r2_service() -> R2Service:
     """Dependencia FastAPI: R2Service."""

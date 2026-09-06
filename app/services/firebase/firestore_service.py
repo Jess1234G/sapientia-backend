@@ -485,6 +485,68 @@ class FirestoreService:
 
         ref.update(fields)
 
+    # =========================================================
+    # ATTACHMENTS
+    # =========================================================
+
+    async def create_attachment_metadata(
+        self,
+        *,
+        attachment_id: str,
+        user_id: str,
+        filename: str,
+        content_type: str,
+        size: int,
+        storage_key: str,
+    ) -> dict:
+        """Guarda la metadata de un adjunto en la colección attachments."""
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        payload = {
+            "attachment_id": attachment_id,
+            "user_id": user_id,
+            "filename": filename,
+            "content_type": content_type,
+            "size": size,
+            "storage_key": storage_key,
+            "created_at": now,
+        }
+
+        ref = (
+            self.client
+            .collection("attachments")
+            .document(attachment_id)
+        )
+
+        ref.set(payload)
+
+        return payload
+
+    async def get_user_attachment(
+        self,
+        attachment_id: str,
+        user_id: str,
+    ) -> dict | None:
+        """Devuelve un adjunto únicamente si pertenece al usuario."""
+
+        document = (
+            self.client
+            .collection("attachments")
+            .document(attachment_id)
+            .get()
+        )
+
+        if not document.exists:
+            return None
+
+        data = document.to_dict()
+
+        if data.get("user_id") != user_id:
+            return None
+
+        return data
+
 
 # =============================================================
 # DEPENDENCY

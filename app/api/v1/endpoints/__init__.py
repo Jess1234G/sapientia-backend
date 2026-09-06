@@ -6,7 +6,15 @@ para que `main.py` solo haga `include_router(api_v1_router)`.
 """
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, chat, graphs, history, pensum, vision
+from app.api.v1.endpoints import (
+    attachments,
+    auth,
+    chat,
+    graphs,
+    history,
+    pensum,
+    vision,
+)
 
 router = APIRouter()
 router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -15,3 +23,8 @@ router.include_router(vision.router, prefix="/vision", tags=["vision"])
 router.include_router(graphs.router, prefix="/graphs", tags=["graphs"])
 router.include_router(history.router, prefix="/history", tags=["history"])
 router.include_router(pensum.router, prefix="/pensum", tags=["pensum"])
+router.include_router(
+    attachments.router,
+    prefix="/attachments",
+    tags=["attachments"],
+)

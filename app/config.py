@@ -84,6 +84,7 @@ class Settings(BaseSettings):
     rate_limit_vision_per_min: int = 5
     rate_limit_graph_per_min: int = 3
     max_image_size_mb: int = 10
+    max_attachment_size_mb: int = 20
 
     # Propiedades derivadas
     @property
