@@ -95,6 +95,14 @@ class FakeDocumentReference:
             else:
                 collection[self.document_id][key] = value
 
+    def delete(self) -> None:
+        collection = self.store.setdefault(
+            self.collection_name,
+            {},
+        )
+
+        collection.pop(self.document_id, None)
+
 
 @dataclass
 class FakeCollectionReference:
@@ -483,3 +491,226 @@ async def test_update_graph_artifact_without_fields_does_nothing(
     ]
 
     assert after == before
+
+
+# ============================================================
+# UPDATE CONVERSATION (F2)
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_update_conversation_renames_title(
+    firestore_service,
+):
+    service, client = firestore_service
+
+    conversation_id = await service.create_conversation(
+        user_id="user-123",
+        title="Título original",
+    )
+
+    result = await service.update_conversation(
+        conversation_id=conversation_id,
+        user_id="user-123",
+        title="Nuevo título",
+    )
+
+    assert result is not None
+    assert result["title"] == "Nuevo título"
+
+    stored = client.store["conversations"][conversation_id]
+    assert stored["title"] == "Nuevo título"
+    assert stored["user_id"] == "user-123"
+    assert stored["messages"] == []
+    assert stored["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_update_conversation_pins(
+    firestore_service,
+):
+    service, client = firestore_service
+
+    conversation_id = await service.create_conversation(
+        user_id="user-123",
+        title="Conversación",
+    )
+
+    result = await service.update_conversation(
+        conversation_id=conversation_id,
+        user_id="user-123",
+        is_pinned=True,
+    )
+
+    assert result is not None
+    assert result["is_pinned"] is True
+
+    stored = client.store["conversations"][conversation_id]
+    assert stored["is_pinned"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_conversation_title_and_pin(
+    firestore_service,
+):
+    service, _ = firestore_service
+
+    conversation_id = await service.create_conversation(
+        user_id="user-123",
+        title="Título",
+    )
+
+    result = await service.update_conversation(
+        conversation_id=conversation_id,
+        user_id="user-123",
+        title="Nuevo",
+        is_pinned=False,
+    )
+
+    assert result["title"] == "Nuevo"
+    assert result["is_pinned"] is False
+
+
+@pytest.mark.asyncio
+async def test_update_conversation_other_user_returns_none(
+    firestore_service,
+):
+    service, _ = firestore_service
+
+    conversation_id = await service.create_conversation(
+        user_id="owner-123",
+        title="Privada",
+    )
+
+    result = await service.update_conversation(
+        conversation_id=conversation_id,
+        user_id="other-user",
+        title="Hackeado",
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_update_conversation_missing_returns_none(
+    firestore_service,
+):
+    service, _ = firestore_service
+
+    result = await service.update_conversation(
+        conversation_id="does-not-exist",
+        user_id="user-123",
+        title="No existe",
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_update_conversation_empty_title_raises(
+    firestore_service,
+):
+    service, _ = firestore_service
+
+    conversation_id = await service.create_conversation(
+        user_id="user-123",
+        title="Título",
+    )
+
+    with pytest.raises(ValueError):
+        await service.update_conversation(
+            conversation_id=conversation_id,
+            user_id="user-123",
+            title="   ",
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_conversation_title_truncated(
+    firestore_service,
+):
+    service, _ = firestore_service
+
+    conversation_id = await service.create_conversation(
+        user_id="user-123",
+        title="Título",
+    )
+
+    result = await service.update_conversation(
+        conversation_id=conversation_id,
+        user_id="user-123",
+        title="a" * 100,
+    )
+
+    assert len(result["title"]) == 80
+
+
+@pytest.mark.asyncio
+async def test_create_conversation_has_is_pinned_false(
+    firestore_service,
+):
+    service, client = firestore_service
+
+    conversation_id = await service.create_conversation(
+        user_id="user-123",
+        title="Título",
+    )
+
+    stored = client.store["conversations"][conversation_id]
+    assert stored["is_pinned"] is False
+
+
+# ============================================================
+# DELETE CONVERSATION (F2)
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_delete_conversation_removes(
+    firestore_service,
+):
+    service, client = firestore_service
+
+    conversation_id = await service.create_conversation(
+        user_id="user-123",
+        title="Título",
+    )
+
+    deleted = await service.delete_conversation(
+        conversation_id=conversation_id,
+        user_id="user-123",
+    )
+
+    assert deleted is True
+    assert conversation_id not in client.store["conversations"]
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation_other_user_returns_false(
+    firestore_service,
+):
+    service, _ = firestore_service
+
+    conversation_id = await service.create_conversation(
+        user_id="owner-123",
+        title="Privada",
+    )
+
+    deleted = await service.delete_conversation(
+        conversation_id=conversation_id,
+        user_id="other-user",
+    )
+
+    assert deleted is False
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation_missing_returns_false(
+    firestore_service,
+):
+    service, _ = firestore_service
+
+    deleted = await service.delete_conversation(
+        conversation_id="does-not-exist",
+        user_id="user-123",
+    )
+
+    assert deleted is False

@@ -22,6 +22,14 @@ class ConversationSummary(BaseModel):
     title: str
     updated_at: str = ""
     status: str = "active"
+    is_pinned: bool = False
+
+
+class ConversationUpdate(BaseModel):
+    """Actualización parcial de una conversación (PATCH)."""
+
+    title: str | None = None
+    is_pinned: bool | None = None
 
 
 class ConversationDetail(ConversationSummary):

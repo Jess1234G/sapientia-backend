@@ -211,6 +211,7 @@ class FirestoreService:
             "messages": [],
             "attachments": [],
             "status": "active",
+            "is_pinned": False,
             "created_at": now,
             "updated_at": now,
         }
@@ -322,6 +323,90 @@ class FirestoreService:
             return None
 
         return conversation
+
+    async def update_conversation(
+        self,
+        conversation_id: str,
+        user_id: str,
+        title: str | None = None,
+        is_pinned: bool | None = None,
+    ) -> dict | None:
+        """
+        Actualiza parcialmente una conversación (renombrar/fijar).
+
+        Devuelve None si la conversación no existe o no pertenece
+        al usuario indicado.
+        """
+
+        conversation = await self.get_user_conversation(
+            conversation_id=conversation_id,
+            user_id=user_id,
+        )
+
+        if conversation is None:
+            return None
+
+        fields: dict = {}
+
+        if title is not None:
+            cleaned_title = title.strip()
+
+            if not cleaned_title:
+                raise ValueError(
+                    "El título no puede estar vacío."
+                )
+
+            fields["title"] = cleaned_title[:80]
+
+        if is_pinned is not None:
+            fields["is_pinned"] = bool(is_pinned)
+
+        if not fields:
+            return conversation
+
+        fields["updated_at"] = datetime.now(
+            timezone.utc
+        ).isoformat()
+
+        ref = (
+            self.client
+            .collection("conversations")
+            .document(conversation_id)
+        )
+
+        ref.update(fields)
+
+        return await self.get_conversation(conversation_id)
+
+    async def delete_conversation(
+        self,
+        conversation_id: str,
+        user_id: str,
+    ) -> bool:
+        """
+        Elimina una conversación únicamente si pertenece al usuario.
+
+        Devuelve True si se eliminó y False si no existe o no
+        pertenece al usuario.
+        """
+
+        conversation = await self.get_user_conversation(
+            conversation_id=conversation_id,
+            user_id=user_id,
+        )
+
+        if conversation is None:
+            return False
+
+        ref = (
+            self.client
+            .collection("conversations")
+            .document(conversation_id)
+        )
+
+        ref.delete()
+
+        return True
 
     # =========================================================
     # GRAPH ARTIFACTS

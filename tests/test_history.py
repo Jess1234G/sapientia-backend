@@ -84,6 +84,52 @@ class FakeHistoryFirestoreService:
 
         return conversation
 
+    async def update_conversation(
+        self,
+        conversation_id: str,
+        user_id: str,
+        title: str | None = None,
+        is_pinned: bool | None = None,
+    ):
+        conversation = self.conversations.get(conversation_id)
+
+        if conversation is None:
+            return None
+
+        if conversation["user_id"] != user_id:
+            return None
+
+        if title is not None:
+            cleaned_title = title.strip()
+
+            if not cleaned_title:
+                raise ValueError(
+                    "El título no puede estar vacío."
+                )
+
+            conversation["title"] = cleaned_title[:80]
+
+        if is_pinned is not None:
+            conversation["is_pinned"] = bool(is_pinned)
+
+        return conversation
+
+    async def delete_conversation(
+        self,
+        conversation_id: str,
+        user_id: str,
+    ):
+        conversation = self.conversations.get(conversation_id)
+
+        if conversation is None:
+            return False
+
+        if conversation["user_id"] != user_id:
+            return False
+
+        del self.conversations[conversation_id]
+        return True
+
 
 def override_dependencies(firestore):
     """
@@ -257,6 +303,235 @@ def test_get_missing_conversation_returns_404(
         assert data["detail"] == (
             "Conversación no encontrada."
         )
+
+    finally:
+        clear_dependencies()
+
+
+# ============================================================
+# PATCH — RENOMBRAR / FIJAR
+# ============================================================
+
+def test_patch_conversation_renames_title(
+    client,
+):
+    firestore = FakeHistoryFirestoreService()
+    override_dependencies(firestore)
+
+    try:
+        response = client.patch(
+            "/api/v1/history/conversations/conversation-1",
+            json={"title": "Nuevo título"},
+        )
+
+        assert response.status_code == 200
+
+        data = response.json()
+
+        assert data["title"] == "Nuevo título"
+        assert data["conversation_id"] == "conversation-1"
+        # Conversación antigua sin is_pinned → False.
+        assert data["is_pinned"] is False
+
+    finally:
+        clear_dependencies()
+
+
+def test_patch_conversation_pins(
+    client,
+):
+    firestore = FakeHistoryFirestoreService()
+    override_dependencies(firestore)
+
+    try:
+        response = client.patch(
+            "/api/v1/history/conversations/conversation-1",
+            json={"is_pinned": True},
+        )
+
+        assert response.status_code == 200
+
+        data = response.json()
+
+        assert data["is_pinned"] is True
+        assert data["title"] == "Derivadas"
+
+    finally:
+        clear_dependencies()
+
+
+def test_patch_conversation_title_and_pin(
+    client,
+):
+    firestore = FakeHistoryFirestoreService()
+    override_dependencies(firestore)
+
+    try:
+        response = client.patch(
+            "/api/v1/history/conversations/conversation-2",
+            json={
+                "title": "Integrales avanzadas",
+                "is_pinned": False,
+            },
+        )
+
+        assert response.status_code == 200
+
+        data = response.json()
+
+        assert data["title"] == "Integrales avanzadas"
+        assert data["is_pinned"] is False
+
+    finally:
+        clear_dependencies()
+
+
+def test_patch_missing_conversation_returns_404(
+    client,
+):
+    firestore = FakeHistoryFirestoreService()
+    override_dependencies(firestore)
+
+    try:
+        response = client.patch(
+            "/api/v1/history/conversations/does-not-exist",
+            json={"title": "Título"},
+        )
+
+        assert response.status_code == 404
+
+        data = response.json()
+
+        assert data["detail"] == "Conversación no encontrada."
+
+    finally:
+        clear_dependencies()
+
+
+def test_patch_other_user_conversation_returns_404(
+    client,
+):
+    firestore = FakeHistoryFirestoreService()
+    override_dependencies(firestore)
+
+    try:
+        response = client.patch(
+            "/api/v1/history/conversations/conversation-other",
+            json={"title": "Hackeado"},
+        )
+
+        assert response.status_code == 404
+
+    finally:
+        clear_dependencies()
+
+
+# ============================================================
+# DELETE
+# ============================================================
+
+def test_delete_conversation_returns_204(
+    client,
+):
+    firestore = FakeHistoryFirestoreService()
+    override_dependencies(firestore)
+
+    try:
+        response = client.delete(
+            "/api/v1/history/conversations/conversation-1"
+        )
+
+        assert response.status_code == 204
+        assert response.content == b""
+
+        assert "conversation-1" not in firestore.conversations
+
+    finally:
+        clear_dependencies()
+
+
+def test_delete_missing_conversation_returns_404(
+    client,
+):
+    firestore = FakeHistoryFirestoreService()
+    override_dependencies(firestore)
+
+    try:
+        response = client.delete(
+            "/api/v1/history/conversations/does-not-exist"
+        )
+
+        assert response.status_code == 404
+
+        data = response.json()
+
+        assert data["detail"] == "Conversación no encontrada."
+
+    finally:
+        clear_dependencies()
+
+
+def test_delete_other_user_conversation_returns_404(
+    client,
+):
+    firestore = FakeHistoryFirestoreService()
+    override_dependencies(firestore)
+
+    try:
+        response = client.delete(
+            "/api/v1/history/conversations/conversation-other"
+        )
+
+        assert response.status_code == 404
+
+        assert "conversation-other" in firestore.conversations
+
+    finally:
+        clear_dependencies()
+
+
+# ============================================================
+# COMPATIBILIDAD CON CONVERSACIONES ANTIGUAS
+# ============================================================
+
+def test_list_old_conversations_return_is_pinned_false(
+    client,
+):
+    firestore = FakeHistoryFirestoreService()
+    override_dependencies(firestore)
+
+    try:
+        response = client.get(
+            "/api/v1/history/conversations"
+        )
+
+        assert response.status_code == 200
+
+        data = response.json()
+
+        for item in data["items"]:
+            assert item["is_pinned"] is False
+
+    finally:
+        clear_dependencies()
+
+
+def test_get_old_conversation_returns_is_pinned_false(
+    client,
+):
+    firestore = FakeHistoryFirestoreService()
+    override_dependencies(firestore)
+
+    try:
+        response = client.get(
+            "/api/v1/history/conversations/conversation-1"
+        )
+
+        assert response.status_code == 200
+
+        data = response.json()
+
+        assert data["is_pinned"] is False
 
     finally:
         clear_dependencies()
