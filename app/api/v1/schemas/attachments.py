@@ -11,3 +11,9 @@ class AttachmentOut(BaseModel):
     filename: str
     content_type: str
     size: int
+
+
+class AttachmentUrlOut(AttachmentOut):
+    """Attachment con URL temporal de descarga para edición."""
+
+    url: str

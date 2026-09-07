@@ -10,7 +10,10 @@ from fastapi import (
     status,
 )
 
-from app.api.v1.schemas.attachments import AttachmentOut
+from app.api.v1.schemas.attachments import (
+    AttachmentOut,
+    AttachmentUrlOut,
+)
 from app.core.security import get_current_user
 from app.services.firebase.firestore_service import (
     FirestoreService,
@@ -67,3 +70,30 @@ async def upload_attachment(
         ) from exc
 
     return metadata
+
+
+@router.get(
+    "/{attachment_id}/url",
+    response_model=AttachmentUrlOut,
+)
+async def get_attachment_download_url(
+    attachment_id: str,
+    uid: str = Depends(get_current_user),
+    attachment_service: AttachmentService = Depends(
+        get_attachment_service
+    ),
+):
+    """Devuelve una URL temporal de descarga de un adjunto autenticado."""
+
+    data = await attachment_service.get_attachment_url(
+        attachment_id,
+        uid,
+    )
+
+    if data is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Adjunto no encontrado.",
+        )
+
+    return data

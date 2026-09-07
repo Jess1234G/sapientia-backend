@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from app.api.v1.schemas.attachments import AttachmentOut
+
 
 class MessageOut(BaseModel):
     """Mensaje serializado para el historial."""
@@ -13,6 +15,7 @@ class MessageOut(BaseModel):
     content: str
     latex: str | None = None
     created_at: str = ""
+    attachments: list[AttachmentOut] = Field(default_factory=list)
 
 
 class ConversationSummary(BaseModel):

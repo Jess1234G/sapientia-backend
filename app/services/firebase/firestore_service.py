@@ -547,6 +547,39 @@ class FirestoreService:
 
         return data
 
+    async def get_user_attachments(
+        self,
+        attachment_ids: list[str],
+        user_id: str,
+    ) -> list[dict]:
+        """
+        Devuelve la metadata de los adjuntos que pertenecen al usuario.
+
+        - Elimina IDs vacíos y duplicados.
+        - Preserva el orden de la entrada.
+        - Verifica ownership mediante get_user_attachment().
+        - Omite adjuntos inexistentes o de otro usuario.
+        """
+
+        result: list[dict] = []
+        seen: set[str] = set()
+
+        for attachment_id in attachment_ids:
+            if not attachment_id or attachment_id in seen:
+                continue
+
+            seen.add(attachment_id)
+
+            attachment = await self.get_user_attachment(
+                attachment_id,
+                user_id,
+            )
+
+            if attachment is not None:
+                result.append(attachment)
+
+        return result
+
 
 # =============================================================
 # DEPENDENCY

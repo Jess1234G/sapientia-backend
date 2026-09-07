@@ -33,6 +33,73 @@ from app.services.firebase.firestore_service import (
 router = APIRouter()
 
 
+async def _resolve_message_attachments(
+    messages: list[dict],
+    uid: str,
+    firestore: FirestoreService,
+) -> list[dict]:
+    """
+    Convierte message["attachments"] (lista de attachment_ids) en
+    metadata pública resuelta, con verificación de ownership.
+
+    Si un attachment_id no existe o no pertenece al usuario, se omite.
+    Nunca se expone storage_key ni user_id.
+    """
+
+    # 1) Recolectar todos los IDs (preservando orden, sin vacíos/duplicados).
+    attachment_ids: list[str] = []
+
+    for message in messages:
+        raw = message.get("attachments")
+
+        if not isinstance(raw, list):
+            continue
+
+        for attachment_id in raw:
+            if attachment_id and attachment_id not in attachment_ids:
+                attachment_ids.append(attachment_id)
+
+    # 2) Resolver en batch (ownership incluido).
+    resolved: dict[str, dict] = {}
+
+    if attachment_ids:
+        for attachment in await firestore.get_user_attachments(
+            attachment_ids,
+            uid,
+        ):
+            resolved[attachment["attachment_id"]] = attachment
+
+    # 3) Reconstruir cada mensaje con attachments resueltos.
+    transformed: list[dict] = []
+
+    for message in messages:
+        raw = message.get("attachments")
+
+        attachments: list[dict] = []
+
+        if isinstance(raw, list):
+            for attachment_id in raw:
+                attachment = resolved.get(attachment_id)
+
+                if attachment is not None:
+                    attachments.append(
+                        {
+                            "attachment_id": attachment[
+                                "attachment_id"
+                            ],
+                            "filename": attachment["filename"],
+                            "content_type": attachment[
+                                "content_type"
+                            ],
+                            "size": attachment["size"],
+                        }
+                    )
+
+        transformed.append({**message, "attachments": attachments})
+
+    return transformed
+
+
 # ============================================================
 # SCHEMAS
 # ============================================================
@@ -149,6 +216,12 @@ async def get_conversation(
     # Las conversaciones antiguas pueden no tener is_pinned.
     conversation.setdefault("is_pinned", False)
 
+    conversation["messages"] = await _resolve_message_attachments(
+        conversation.get("messages", []),
+        uid,
+        firestore,
+    )
+
     return conversation
 
 
@@ -195,6 +268,12 @@ async def update_conversation(
 
     # Las conversaciones antiguas pueden no tener is_pinned.
     conversation.setdefault("is_pinned", False)
+
+    conversation["messages"] = await _resolve_message_attachments(
+        conversation.get("messages", []),
+        uid,
+        firestore,
+    )
 
     return conversation
 

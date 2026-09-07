@@ -38,6 +38,9 @@ EXTENSION_TO_MIME = {
 
 IMAGE_CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp"}
 
+# Duración (segundos) de las URLs prefirmadas de descarga temporal.
+PRESIGNED_URL_EXPIRES_IN = 300
+
 
 class AttachmentServiceError(RuntimeError):
     """Error controlado del servicio de adjuntos."""
@@ -175,3 +178,40 @@ class AttachmentService:
             attachment_id,
             user_id,
         )
+
+    async def get_attachment_url(
+        self,
+        attachment_id: str,
+        user_id: str,
+    ) -> dict | None:
+        """
+        Devuelve metadata pública + URL prefirmada temporal de descarga.
+
+        La URL se genera con el storage_key interno; nunca se expone
+        storage_key, user_id ni credenciales. Devuelve None si el
+        adjunto no existe o no pertenece al usuario.
+        """
+
+        metadata = await self.firestore.get_user_attachment(
+            attachment_id,
+            user_id,
+        )
+
+        if metadata is None:
+            return None
+
+        url = self.r2.generate_presigned_url(
+            metadata.get("storage_key", ""),
+            expires_in=PRESIGNED_URL_EXPIRES_IN,
+        )
+
+        return {
+            "attachment_id": metadata.get(
+                "attachment_id",
+                attachment_id,
+            ),
+            "filename": metadata.get("filename", ""),
+            "content_type": metadata.get("content_type", ""),
+            "size": metadata.get("size", 0),
+            "url": url,
+        }
